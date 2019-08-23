@@ -1,0 +1,70 @@
+FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
+
+RUN rm /etc/apt/sources.list.d/*
+
+# TENSORRT PART
+# Install requried libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4-openssl-dev \
+    wget \
+    zlib1g-dev \
+    git \
+    pkg-config \
+    python3 \
+    python3-pip \
+    git
+
+RUN cd /usr/local/bin &&\
+    ln -s /usr/bin/python3 python &&\
+    ln -s /usr/bin/pip3 pip
+
+# Install Cmake
+RUN cd /tmp &&\
+    wget https://github.com/Kitware/CMake/releases/download/v3.14.4/cmake-3.14.4-Linux-x86_64.sh --no-check-certificate &&\
+    chmod +x cmake-3.14.4-Linux-x86_64.sh &&\
+    ./cmake-3.14.4-Linux-x86_64.sh --prefix=/usr/local --exclude-subdir --skip-license &&\
+    rm ./cmake-3.14.4-Linux-x86_64.sh
+
+RUN wget https://developer.nvidia.com/compute/machine-learning/tensorrt/5.1/ga/tars/TensorRT-5.1.5.0.Ubuntu-18.04.2.x86_64-gnu.cuda-10.0.cudnn7.5.tar.gz
+RUN tar -xvzf TensorRT-5.1.5.0.Ubuntu-18.04.2.x86_64-gnu.cuda-10.0.cudnn7.5.tar.gz
+ENV TRT_RELEASE /TensorRT-5.1.5.0
+RUN rm /TensorRT-5.1.5.0.Ubuntu-18.04.2.x86_64-gnu.cuda-10.0.cudnn7.5.tar.gz
+
+
+ENV TRT_SOURCE /workspace/TensorRT
+RUN mkdir workspace && cd workspace
+RUN git clone -b release/5.1 https://github.com/nvidia/TensorRT $TRT_SOURCE
+RUN cd $TRT_SOURCE && \
+	git submodule update --init --recursive && \
+	mkdir -p build && cd build && \
+	cmake .. -DTRT_LIB_DIR=$TRT_RELEASE/lib -DTRT_BIN_DIR=$TRT_SOURCE/out -DBUILD_PARSERS=ON -DBUILD_PLUGINS=ON && \
+	make -j$(nproc) && \
+	make install
+
+
+# ONNXRUNTIME PART
+RUN git clone --recursive https://github.com/Microsoft/onnxruntime
+RUN apt-get install -y python3-dev libpng-dev python3-numpy apt-utils language-pack-en python3-setuptools
+RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
+RUN	cd onnxruntime && \
+	./build.sh --cudnn_home /usr/lib/x86_64-linux-gnu/ --cuda_home /usr/local/cuda-10.0 --use_tensorrt --tensorrt_home $TRT_RELEASE --enable_pybind --config RelWithDebInfo --parallel --build_shared_lib
+RUN cd /onnxruntime/build/Linux/RelWithDebInfo && python3 /onnxruntime/setup.py install
+
+RUN echo $TRT_RELEASE/targets/x86_64-linux-gnu/lib/ > /etc/ld.so.conf.d/tensorrt.conf
+RUN pip install onnx pillow matplotlib
+
+RUN apt-get install -y locate && updatedb
+
+
+WORKDIR /workspace
+RUN ["/bin/bash"]
+
+
+
+
+
+
+
+
+# sudo xhost +
+# nvidia-docker run -ti --rm -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -v /:/host -v /home/$USER/:/home/$USER/ onnxrt
